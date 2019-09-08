@@ -1,0 +1,124 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+
+
+// DEFINIATIONS ---------------------------------------------------------------------------------------------
+struct ParticleData
+{
+	float4 Position;
+	float4 Color;
+};
+
+struct MeshData {
+	float3 Position;
+};
+struct MeshDataUV {
+	float2 UV;
+};
+
+
+// DECLRATIONS ---------------------------------------------------------------------------------------------
+//General stuff
+float _Time;
+float4 _Color1;
+float4 _Color2;
+float4 _Color3;
+float3 CameraPosition;
+float3 CameraForward;
+StructuredBuffer<ParticleData> _inParticleBuffer;
+RWStructuredBuffer<ParticleData> _outParticleBuffer;
+int _NumberOfParticles;
+float meshOneTwoTransition;
+
+
+//Mesh One
+int _CachePointVertexcoundOne;
+float4 _transformInfoOne;
+StructuredBuffer<MeshData> _MeshDataOne;
+StructuredBuffer<MeshDataUV> _MeshDataUVOne;
+
+Texture2D _MeshTextureOne;
+SamplerState sampler_MeshTextureOne 
+{
+	Filter = MIN_MAG_MIP_LINEAR;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+//Mesh Two
+int _CachePointVertexcoundTwo;
+float4 _transformInfoTwo;
+StructuredBuffer<MeshData> _MeshDataTwo;
+StructuredBuffer<MeshDataUV> _MeshDataUVTwo;
+
+Texture2D _MeshTextureTwo;
+SamplerState sampler_MeshTextureTwo
+{
+	Filter = MIN_MAG_MIP_LINEAR;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+// HELPER FUNCTIONS --------------------------------------------------------------------------------------------
+
+
+float4 SampleFromColorScheme(float r1, float r2, float4 _Color1, float4 _Color2, float4 _Color3) {
+	return (1. - sqrt(r1))*_Color1 + (sqrt(r1)*(1. - r2))*_Color2 + (r2*sqrt(r1)) * _Color3;
+}
+
+float randOneD(float seed) {
+	return frac(sin(seed*21.)*61.);
+}
+float3 rgb2hsv(float3 c)
+{
+	float4 K = float4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+	float4 p = lerp(float4(c.bg, K.wz), float4(c.gb, K.xy), step(c.b, c.g));
+	float4 q = lerp(float4(p.xyw, c.r), float4(c.r, p.yzx), step(p.x, c.r));
+
+	float d = q.x - min(q.w, q.y);
+	float e = 1.0e-10;
+	return float3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+// MAIN PARTICLE LOOP --------------------------------------------------------------------------------------------
+
+[numthreads(10,1,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+
+	ParticleData pIn = _inParticleBuffer[id.x];
+	float r = frac(float(id.x));
+	float c = floor(float(id.x) );
+	
+	// Mesh One
+	float stride = ((float)_CachePointVertexcoundOne)/((float)_NumberOfParticles);
+	stride = max(1., stride);
+	stride = id.x * floor(stride);
+	float3 cachePosOne = _MeshDataOne[floor(stride)].Position * _transformInfoOne.w + _transformInfoOne.xyz;
+	float2 uv = _MeshDataUVOne[floor(stride)].UV;
+	float4 colorOne = _MeshTextureOne.SampleLevel(sampler_MeshTextureOne, uv, 0);
+
+	//Mesh Two
+	stride = ((float)_CachePointVertexcoundTwo) / ((float)_NumberOfParticles);
+	stride = max(1., stride);
+	stride = id.x * floor(stride);
+	float3 cachePosTwo = _MeshDataTwo[floor(stride)].Position* _transformInfoTwo.w + _transformInfoTwo.xyz;
+	uv = _MeshDataUVTwo[floor(stride)].UV;
+	float4 colorTwo = _MeshTextureTwo.SampleLevel(sampler_MeshTextureTwo, uv, 0);
+
+	//Set color and position
+	pIn.Color = lerp(colorOne, colorTwo, meshOneTwoTransition);
+	pIn.Position.xyz = lerp(cachePosOne, cachePosTwo, meshOneTwoTransition);
+
+	//Passing info to the vertex shaders of the particles, I was using this to adjust particle size and fog
+	float dToCam = distance(CameraPosition.xz, pIn.Position.xz);
+	pIn.Position.w = dToCam;
+	dToCam = smoothstep(5., 1000., dToCam);
+
+	// Colorazations
+	colorOne.xyz = rgb2hsv(pIn.Color.xyz);
+	pIn.Color = lerp(pIn.Color, SampleFromColorScheme(colorOne.y, colorOne.z, _Color1, _Color2, _Color3) , _Color1.a);
+
+	_outParticleBuffer[id.x] = pIn;
+}
