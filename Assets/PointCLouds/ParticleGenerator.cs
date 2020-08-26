@@ -146,7 +146,7 @@ public class ParticleGenerator : MonoBehaviour
         cp.SetVector("CameraPosition", this.transform.InverseTransformPoint(Camera.main.transform.position));
         cp.SetVector("CameraForward", this.transform.InverseTransformDirection(Camera.main.transform.forward));
 
-        cp.Dispatch(kernelHandle, numberOfParticles, 1, 1);
+        cp.Dispatch(kernelHandle, numberOfParticles/10, 1, 1);
         isOld = !isOld;
 
 
